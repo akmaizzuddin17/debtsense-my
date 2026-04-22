@@ -16,6 +16,14 @@ DebtSense MY solves this by building **financial resilience as a layer of digita
 
 ---
 
+## 🚀 Live Demo
+
+**[https://debtsense-my-475064580430.asia-southeast1.run.app](https://debtsense-my-475064580430.asia-southeast1.run.app)**
+
+Deployed on Google Cloud Run. Powered by 5 Gemini AI agents. Secured by RM1,200 Google Cloud credits.
+
+---
+
 ## The 5-Agent Multi-Agent Pipeline
 
 All agents run sequentially via a streaming SSE pipeline. Each agent feeds context into the next.
@@ -39,12 +47,13 @@ Additional agents:
 
 | Layer | Technology |
 |-------|-----------|
-| AI Model | Gemini 2.5 Flash (`@google/generative-ai` SDK) |
+| AI Model | Gemini 2.5 Flash (`@google-cloud/vertexai` SDK) |
 | Backend | Node.js + Express |
 | Streaming | Server-Sent Events (SSE) — real-time per-agent results |
 | Frontend | React + Vite |
-| Deployment | Google Cloud Run |
-| Development | Google AI Studio + Antigravity |
+| Deployment | Google Cloud Run (asia-southeast1) |
+| Authentication | Service Account (Cloud Run automatic) |
+| Billing | Google Cloud credits (RM1,200 hackathon credits) |
 
 ---
 
@@ -64,9 +73,11 @@ Express Backend (Node.js)
       |
   Shield Score calculation (pure math, server-side)
       |
-Gemini 2.5 Flash API (Google AI)
+Vertex AI API + Gemini 2.5 Flash (@google-cloud/vertexai SDK)
       |
-Google Cloud Run (deployed)
+Google Cloud Run (asia-southeast1, min 1 instance)
+      |
+RM1,200 Google Cloud Credits (hackathon budget)
 ```
 
 ---
@@ -81,7 +92,7 @@ This project uses AI coding assistance (Claude Code by Anthropic) for frontend/b
 
 ### Prerequisites
 - Node.js 18+
-- A Gemini API key (free at [aistudio.google.com](https://aistudio.google.com))
+- A Gemini API key from Google Cloud Console (associated with a Google Cloud project)
 
 ### Step 1 — Clone & Install
 
@@ -130,21 +141,29 @@ cd frontend && npm run dev
 
 ## Deploy to Google Cloud Run
 
-### One-command deploy (after `gcloud auth login`):
+### Prerequisites
+- `gcloud` CLI installed and authenticated (`gcloud auth login`)
+- Google Cloud project with billing enabled
+- Vertex AI API enabled in the project
+
+### One-command deploy:
 
 ```bash
 # Build frontend first
 cd frontend && npm run build && cd ..
 
-# Deploy
+# Deploy with Vertex AI (no API key needed — Cloud Run uses Service Account)
 gcloud run deploy debtsense-my \
   --source . \
   --platform managed \
   --region asia-southeast1 \
   --allow-unauthenticated \
-  --set-env-vars GEMINI_API_KEY=your_api_key_here \
+  --min-instances 1 \
+  --set-env-vars GOOGLE_CLOUD_PROJECT=your_project_id \
   --port 3001
 ```
+
+**Note:** The backend automatically uses the Cloud Run Service Account for Vertex AI authentication. No API key needed in production. All charges go against your Google Cloud billing account (or free credits if available).
 
 ---
 

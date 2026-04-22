@@ -1,22 +1,22 @@
 import express from 'express';
 import cors from 'cors';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import dotenv from 'dotenv';
+import { VertexAI } from '@google-cloud/vertexai';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { existsSync } from 'fs';
-
-dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), '../.env') });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-console.log('DebtSense MY backend — Gemini 2.5 Flash');
+console.log('DebtSense MY backend — Gemini 2.5 Flash via Vertex AI');
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const getGeminiModel = () => genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+const vertexAI = new VertexAI({
+  project: 'gen-lang-client-0167842911',
+  location: 'us-central1',
+});
+const getGeminiModel = () => vertexAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 function parseJSON(text) {
   const clean = text
@@ -49,10 +49,17 @@ async function callGemini(prompt, retries = 3) {
     try {
       const timeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Agent timed out after 60s')), 60000));
-      const result = await Promise.race([model.generateContent(prompt), timeout]);
-      return parseJSON(result.response.text());
+      const req = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+      const result = await Promise.race([model.generateContent(req), timeout]);
+      const text = result.response?.candidates?.[0]?.content?.parts?.[0]?.text
+        ?? result.response?.text?.()
+        ?? '';
+      return parseJSON(text);
     } catch (err) {
-      const is503 = err.message?.includes('503') || err.message?.includes('high demand') || err.message?.includes('Service Unavailable') || err.message?.includes('overloaded');
+      const msg = err.message || '';
+      const is429 = msg.includes('429') || msg.includes('depleted') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
+      if (is429) throw new Error('GEMINI_QUOTA: Gemini API quota exceeded. Please get a new free API key at aistudio.google.com and update your .env file.');
+      const is503 = msg.includes('503') || msg.includes('high demand') || msg.includes('Service Unavailable') || msg.includes('overloaded');
       if (is503 && attempt < retries) {
         console.log(`[Retry ${attempt}/${retries}] 503 — waiting ${attempt * 3}s...`);
         await new Promise(r => setTimeout(r, attempt * 3000));

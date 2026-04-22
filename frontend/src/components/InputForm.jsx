@@ -259,6 +259,9 @@ export default function InputForm({ onAnalyze }) {
   const [lastSaved,              setLastSaved]              = useState(null)
   const [quickPurchaseResult,    setQuickPurchaseResult]    = useState(null)
   const [quickPurchaseLoading,   setQuickPurchaseLoading]   = useState(false)
+  const [errorMsg,               setErrorMsg]               = useState('')
+  const [purchaseError,          setPurchaseError]          = useState('')
+  const [backendDown,            setBackendDown]            = useState(false)
 
   // Auto-save to localStorage (debounced 600ms)
   useEffect(() => {
@@ -271,6 +274,10 @@ export default function InputForm({ onAnalyze }) {
     }, 600)
     return () => clearTimeout(t)
   }, [income, debts, expenses, currentSavings, monthlySavingsTarget, monthlyInvestmentBudget, age, lifeStage, riskAppetite, purchaseItem, purchaseCost, purchaseMethod])
+
+  useEffect(() => {
+    fetch('/api/health').then(r => setBackendDown(!r.ok)).catch(() => setBackendDown(true))
+  }, [])
 
   const totalIncome   = Object.values(income).reduce((a, b) => a + (Number(b) || 0), 0)
   const totalDebts    = Object.values(debts).reduce((a, b) => a + (Number(b) || 0), 0)
@@ -297,10 +304,11 @@ export default function InputForm({ onAnalyze }) {
   }
 
   const checkPurchase = async () => {
-    if (!purchaseItem) { alert('Please enter what you want to buy!'); return }
-    if (totalIncome === 0) { alert('Please enter your income in My Finances first!'); return }
+    if (!purchaseItem) { setPurchaseError('Please enter what you want to buy.'); return }
+    if (totalIncome === 0) { setPurchaseError('Please enter your income in My Finances first.'); return }
     setQuickPurchaseLoading(true)
     setQuickPurchaseResult(null)
+    setPurchaseError('')
     try {
       const profile = { income, debts, expenses, currentSavings: Number(currentSavings) || 0, age: Number(age) || 25, lifeStage, riskAppetite }
       const purchasePayload = { item: purchaseItem, estimatedCost: Number(purchaseCost) || 0, paymentMethod: purchaseMethod }
@@ -309,14 +317,21 @@ export default function InputForm({ onAnalyze }) {
       const data = await res.json()
       setQuickPurchaseResult(data)
     } catch (e) {
-      alert('Purchase check failed: ' + e.message)
+      const raw = e.message || ''
+      const msg = (raw.includes('GEMINI_QUOTA') || raw.includes('quota') || raw.includes('depleted'))
+        ? 'Gemini API quota exceeded — get a new key at aistudio.google.com'
+        : (raw.includes('500') || raw.includes('502') || raw === 'Failed to fetch')
+          ? 'Cannot reach AI server. Run: node backend/server.js'
+          : raw
+      setPurchaseError(msg)
     } finally {
       setQuickPurchaseLoading(false)
     }
   }
 
   const handleAnalyze = async () => {
-    if (totalIncome === 0) { alert('Please enter at least your monthly income!'); return }
+    if (totalIncome === 0) { setErrorMsg('Please enter at least your monthly income.'); return }
+    setErrorMsg('')
     setLoading(true)
     setCompletedAgents([])
 
@@ -372,7 +387,17 @@ export default function InputForm({ onAnalyze }) {
       if (!collectedResults.dsr && !collectedResults.risk) throw new Error('Analysis failed to start — check your backend is running.')
       onAnalyze({ income, debts, expenses, currentSavings, monthlySavingsTarget, monthlyInvestmentBudget, age, lifeStage, riskAppetite, purchaseItem: purchase }, collectedResults)
     } catch (e) {
-      alert('Error: ' + e.message)
+      const raw = e.message || ''
+      let msg
+      if (raw.includes('GEMINI_QUOTA') || raw.includes('quota') || raw.includes('depleted')) {
+        msg = 'Gemini API quota exceeded. Get a free API key at aistudio.google.com and update your .env file, then restart the backend.'
+      } else if (raw.includes('500') || raw.includes('502') || raw.includes('503') || raw === 'Failed to fetch') {
+        msg = 'Server is temporarily unavailable. Please try again in a moment.'
+        setBackendDown(false)
+      } else {
+        msg = raw || 'Analysis failed. Please try again.'
+      }
+      setErrorMsg(msg)
     } finally {
       setLoading(false)
     }
@@ -471,6 +496,22 @@ export default function InputForm({ onAnalyze }) {
             </button>
           ))}
         </div>
+
+        {/* Backend-down warning */}
+        {backendDown && (
+          <div style={{ background: 'rgba(255,59,48,0.08)', border: '0.5px solid rgba(255,59,48,0.30)', borderRadius: 12, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#cc2f26', marginBottom: 4 }}>Backend not running</div>
+            <div style={{ fontSize: 10, color: 'var(--label-2)', lineHeight: 1.5 }}>Open a terminal and run:<br /><code style={{ background: 'rgba(0,0,0,0.06)', borderRadius: 4, padding: '1px 5px', fontSize: 10 }}>node backend/server.js</code></div>
+          </div>
+        )}
+
+        {/* Inline error */}
+        {errorMsg && (
+          <div style={{ background: 'rgba(255,59,48,0.08)', border: '0.5px solid rgba(255,59,48,0.30)', borderRadius: 12, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+            <span style={{ fontSize: 11, color: '#cc2f26', lineHeight: 1.5, flex: 1 }}>{errorMsg}</span>
+            <button onClick={() => setErrorMsg('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#cc2f26', fontSize: 14, padding: 0, lineHeight: 1, flexShrink: 0 }}>x</button>
+          </div>
+        )}
 
         {/* Analyze / Loading */}
         <div style={{ marginTop: 'auto', paddingTop: 8 }}>
@@ -665,6 +706,11 @@ export default function InputForm({ onAnalyze }) {
               </button>
               <span style={{ fontSize: 'var(--sz-footnote)', color: 'var(--label-3)' }}>or include it in your full analysis below</span>
             </div>
+            {purchaseError && (
+              <div style={{ marginTop: 10, background: 'rgba(255,59,48,0.08)', border: '0.5px solid rgba(255,59,48,0.30)', borderRadius: 10, padding: '9px 12px', fontSize: 11, color: '#cc2f26' }}>
+                {purchaseError}
+              </div>
+            )}
 
             {quickPurchaseResult && (() => {
               const r = quickPurchaseResult
