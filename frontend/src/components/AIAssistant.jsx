@@ -46,32 +46,40 @@ export default function AIAssistant({ results, formData }) {
     setInput('')
     setMessages(prev => [...prev, { role: 'user', text: q }])
     setLoading(true)
-    try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 30000)
-      const res = await fetch('/api/ask', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ question: q, analysisData: results || {}, formData: formData || {} }),
-        signal:  controller.signal,
-      })
-      clearTimeout(timer)
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
-      const data = await res.json()
-      setMessages(prev => [...prev, { role: 'ai', text: data.answer || 'No response received.' }])
-    } catch (e) {
-      const raw = e.message || ''
-      const text = (raw.includes('abort') || raw.includes('AbortError'))
-        ? 'Request timed out — the server is warming up. Please try again in a few seconds.'
-        : (raw.includes('GEMINI_QUOTA') || raw.includes('quota') || raw.includes('depleted'))
-          ? 'AI quota exceeded. Please try again later.'
-          : (raw.includes('500') || raw.includes('502') || raw.includes('503') || raw === 'Failed to fetch')
-            ? 'Server is temporarily unavailable. Please try again in a moment.'
-            : `Sorry, I couldn't respond right now. Please try again.`
-      setMessages(prev => [...prev, { role: 'ai', text, error: true }])
-    } finally {
-      setLoading(false)
+
+    let lastError = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 3000))
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 90000)
+        const res = await fetch('/api/ask', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ question: q, analysisData: results || {}, formData: formData || {} }),
+          signal:  controller.signal,
+        })
+        clearTimeout(timer)
+        if (!res.ok) throw new Error(`Server error ${res.status}`)
+        const data = await res.json()
+        setMessages(prev => [...prev, { role: 'ai', text: data.answer || 'No response received.' }])
+        setLoading(false)
+        return
+      } catch (e) {
+        lastError = e
+        const raw = e.message || ''
+        const isRetryable = raw.includes('abort') || raw.includes('AbortError') ||
+                            raw.includes('500') || raw.includes('503') || raw === 'Failed to fetch'
+        if (!isRetryable) break
+      }
     }
+
+    const raw = lastError?.message || ''
+    const errText = (raw.includes('GEMINI_QUOTA') || raw.includes('quota') || raw.includes('depleted'))
+      ? 'AI quota exceeded. Please try again later.'
+      : 'Server is temporarily unavailable. Please try again in a moment.'
+    setMessages(prev => [...prev, { role: 'ai', text: errText, error: true }])
+    setLoading(false)
   }
 
   const handleKeyDown = (e) => {
