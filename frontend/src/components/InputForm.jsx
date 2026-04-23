@@ -66,15 +66,33 @@ function ScamCheckerSection() {
   const handleCheck = async () => {
     if (!offer.trim()) return
     setChecking(true); setResult(null); setError('')
-    try {
-      const res = await fetch('/api/scam-check', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ offerText: offer }),
-      })
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
-      setResult(await res.json())
-    } catch (e) { setError(e.message) }
-    finally { setChecking(false) }
+    let lastErr = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 3000))
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 90000)
+        const res = await fetch('/api/scam-check', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ offerText: offer }),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (res.status === 429) throw new Error('rate_limited')
+        if (!res.ok) throw new Error(`Server error ${res.status}`)
+        setResult(await res.json())
+        setChecking(false)
+        return
+      } catch (e) {
+        lastErr = e
+        const raw = e.message || ''
+        if (raw === 'rate_limited' || raw.includes('quota')) break
+        if (!raw.includes('abort') && !raw.includes('500') && !raw.includes('503') && raw !== 'Failed to fetch') break
+      }
+    }
+    const raw = lastErr?.message || ''
+    setError(raw === 'rate_limited' ? 'Too many requests — please wait a moment.' : raw.includes('quota') ? 'AI quota exceeded. Please try again later.' : 'Server is temporarily unavailable. Please try again in a moment.')
+    setChecking(false)
   }
 
   const verdictColor  = result?.verdict === 'LIKELY_SCAM' ? '#cc2f26' : result?.verdict === 'SUSPICIOUS' ? '#b86e00' : '#1a9930'
@@ -309,24 +327,32 @@ export default function InputForm({ onAnalyze }) {
     setQuickPurchaseLoading(true)
     setQuickPurchaseResult(null)
     setPurchaseError('')
-    try {
-      const profile = { income, debts, expenses, currentSavings: Number(currentSavings) || 0, age: Number(age) || 25, lifeStage, riskAppetite }
-      const purchasePayload = { item: purchaseItem, estimatedCost: Number(purchaseCost) || 0, paymentMethod: purchaseMethod }
-      const res = await fetch('/api/quick-purchase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile, purchaseItem: purchasePayload }) })
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
-      const data = await res.json()
-      setQuickPurchaseResult(data)
-    } catch (e) {
-      const raw = e.message || ''
-      const msg = (raw.includes('GEMINI_QUOTA') || raw.includes('quota') || raw.includes('depleted'))
-        ? 'Gemini API quota exceeded — get a new key at aistudio.google.com'
-        : (raw.includes('500') || raw.includes('502') || raw === 'Failed to fetch')
-          ? 'Cannot reach AI server. Run: node backend/server.js'
-          : raw
-      setPurchaseError(msg)
-    } finally {
-      setQuickPurchaseLoading(false)
+    let lastErr = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 3000))
+      try {
+        const profile = { income, debts, expenses, currentSavings: Number(currentSavings) || 0, age: Number(age) || 25, lifeStage, riskAppetite }
+        const purchasePayload = { item: purchaseItem, estimatedCost: Number(purchaseCost) || 0, paymentMethod: purchaseMethod }
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 90000)
+        const res = await fetch('/api/quick-purchase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile, purchaseItem: purchasePayload }), signal: controller.signal })
+        clearTimeout(timer)
+        if (res.status === 429) throw new Error('rate_limited')
+        if (!res.ok) throw new Error(`Server error ${res.status}`)
+        const data = await res.json()
+        setQuickPurchaseResult(data)
+        setQuickPurchaseLoading(false)
+        return
+      } catch (e) {
+        lastErr = e
+        const raw = e.message || ''
+        if (raw === 'rate_limited' || raw.includes('quota')) break
+        if (!raw.includes('abort') && !raw.includes('500') && !raw.includes('503') && raw !== 'Failed to fetch') break
+      }
     }
+    const raw = lastErr?.message || ''
+    setPurchaseError(raw === 'rate_limited' ? 'Too many requests — please wait a moment.' : raw.includes('quota') ? 'AI quota exceeded. Please try again later.' : 'Server is temporarily unavailable. Please try again in a moment.')
+    setQuickPurchaseLoading(false)
   }
 
   const handleAnalyze = async () => {
@@ -389,11 +415,12 @@ export default function InputForm({ onAnalyze }) {
     } catch (e) {
       const raw = e.message || ''
       let msg
-      if (raw.includes('GEMINI_QUOTA') || raw.includes('quota') || raw.includes('depleted')) {
-        msg = 'Gemini API quota exceeded. Get a free API key at aistudio.google.com and update your .env file, then restart the backend.'
+      if (raw.includes('429') || raw === 'rate_limited') {
+        msg = 'Too many requests — please wait a moment and try again.'
+      } else if (raw.includes('GEMINI_QUOTA') || raw.includes('quota') || raw.includes('depleted')) {
+        msg = 'AI quota exceeded. Please try again later.'
       } else if (raw.includes('500') || raw.includes('502') || raw.includes('503') || raw === 'Failed to fetch') {
         msg = 'Server is temporarily unavailable. Please try again in a moment.'
-        setBackendDown(false)
       } else {
         msg = raw || 'Analysis failed. Please try again.'
       }
@@ -500,8 +527,8 @@ export default function InputForm({ onAnalyze }) {
         {/* Backend-down warning */}
         {backendDown && (
           <div style={{ background: 'rgba(255,59,48,0.08)', border: '0.5px solid rgba(255,59,48,0.30)', borderRadius: 12, padding: '10px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#cc2f26', marginBottom: 4 }}>Backend not running</div>
-            <div style={{ fontSize: 10, color: 'var(--label-2)', lineHeight: 1.5 }}>Open a terminal and run:<br /><code style={{ background: 'rgba(0,0,0,0.06)', borderRadius: 4, padding: '1px 5px', fontSize: 10 }}>node backend/server.js</code></div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#cc2f26', marginBottom: 4 }}>Service temporarily unavailable</div>
+            <div style={{ fontSize: 10, color: 'var(--label-2)', lineHeight: 1.5 }}>The server is warming up. Please wait a moment and try again.</div>
           </div>
         )}
 

@@ -8,7 +8,20 @@ import { existsSync } from 'fs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
+
+// ─── Rate limiter: 20 AI requests per IP per minute ──────────────────────────
+const _rl = new Map();
+setInterval(() => { const t = Date.now(); for (const [k, v] of _rl) if (t > v.reset + 600000) _rl.delete(k); }, 600000);
+function aiRateLimit(req, res, next) {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const e = _rl.get(ip) || { n: 0, reset: now + 60000 };
+  if (now > e.reset) { e.n = 0; e.reset = now + 60000; }
+  e.n++; _rl.set(ip, e);
+  if (e.n > 20) return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
+  next();
+}
 
 console.log('DebtSense MY backend — Gemini 2.5 Flash via Vertex AI');
 
@@ -376,7 +389,7 @@ function calculateShieldScore(dsr, risk, investment, plan) {
 }
 
 // ─── Main Analysis Endpoint ───────────────────────────────────────────────
-app.post('/api/analyze', async (req, res) => {
+app.post('/api/analyze', aiRateLimit, async (req, res) => {
   try {
     const { profile, purchaseItem } = req.body;
     const totalDebt     = Object.values(profile.debts    || {}).reduce((a, b) => a + (Number(b) || 0), 0);
@@ -551,7 +564,7 @@ Return JSON only:
 {"vulnerability_score":0,"overall_level":"MEDIUM","money_mule_risk":"LOW","money_mule_explanation":"Short explanation","predatory_loan_risk":"LOW","predatory_loan_explanation":"Short explanation","fraud_entry_points":["point 1","point 2","point 3"],"protective_actions":["action 1","action 2","action 3"],"high_risk_loans":[],"digital_safety_tips":["tip 1","tip 2","tip 3"],"summary":"One sentence."}`, 1500);
 }
 
-app.post('/api/fraud-profile', async (req, res) => {
+app.post('/api/fraud-profile', aiRateLimit, async (req, res) => {
   try {
     const body = req.body;
     if (!body) return res.status(400).json({ error: 'Missing data' });
@@ -583,7 +596,7 @@ app.post('/api/fraud-profile', async (req, res) => {
 });
 
 // ─── Quick Purchase Check (standalone, no full pipeline) ─────────────────
-app.post('/api/quick-purchase', async (req, res) => {
+app.post('/api/quick-purchase', aiRateLimit, async (req, res) => {
   try {
     const { profile, purchaseItem } = req.body;
     if (!profile || !purchaseItem?.item) return res.status(400).json({ error: 'Missing profile or purchaseItem' });
@@ -613,7 +626,7 @@ app.post('/api/quick-purchase', async (req, res) => {
 });
 
 // ─── Tax & Zakat Endpoint (Agent 7) ──────────────────────────────────────
-app.post('/api/tax-zakat', async (req, res) => {
+app.post('/api/tax-zakat', aiRateLimit, async (req, res) => {
   try {
     const { profile } = req.body;
     if (!profile) return res.status(400).json({ error: 'Missing profile' });
@@ -652,10 +665,11 @@ app.post('/api/tax-zakat', async (req, res) => {
 });
 
 // ─── Scam Check Endpoint (Agent 6) ───────────────────────────────────────
-app.post('/api/scam-check', async (req, res) => {
+app.post('/api/scam-check', aiRateLimit, async (req, res) => {
   try {
     const { offerText, userProfile } = req.body;
     if (!offerText?.trim()) return res.status(400).json({ error: 'Offer text required' });
+    if (offerText.trim().length > 2000) return res.status(400).json({ error: 'Message too long (max 2000 characters)' });
     const result = await agentScamDetector(offerText.trim(), userProfile || {});
     // Enforce valid verdict values
     const validVerdicts = ['LIKELY_SCAM', 'SUSPICIOUS', 'LEGITIMATE'];
@@ -668,10 +682,11 @@ app.post('/api/scam-check', async (req, res) => {
 });
 
 // ─── AI Assistant Q&A Endpoint ───────────────────────────────────────────
-app.post('/api/ask', async (req, res) => {
+app.post('/api/ask', aiRateLimit, async (req, res) => {
   try {
     const { question, analysisData, formData } = req.body;
     if (!question?.trim()) return res.status(400).json({ error: 'Question required' });
+    if (question.trim().length > 1000) return res.status(400).json({ error: 'Question too long (max 1000 characters)' });
 
     const dsr        = analysisData?.dsr        || {};
     const risk       = analysisData?.risk        || {};

@@ -545,25 +545,43 @@ function TaxZakatTab({ formData }) {
 
   const handleCalculate = async () => {
     setLoading(true); setError('')
-    try {
-      const res = await fetch('/api/tax-zakat', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          profile: {
-            income:        formData?.income,
-            debts:         formData?.debts,
-            expenses:      formData?.expenses,
-            age:           formData?.age,
-            lifeStage:     formData?.lifeStage,
-            currentSavings: formData?.currentSavings,
-          },
-        }),
-      })
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
-      setData(await res.json())
-    } catch (e) { setError(e.message) }
-    finally { setLoading(false) }
+    let lastErr = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 3000))
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 90000)
+        const res = await fetch('/api/tax-zakat', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            profile: {
+              income:        formData?.income,
+              debts:         formData?.debts,
+              expenses:      formData?.expenses,
+              age:           formData?.age,
+              lifeStage:     formData?.lifeStage,
+              currentSavings: formData?.currentSavings,
+            },
+          }),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (res.status === 429) throw new Error('rate_limited')
+        if (!res.ok) throw new Error(`Server error ${res.status}`)
+        setData(await res.json())
+        setLoading(false)
+        return
+      } catch (e) {
+        lastErr = e
+        const raw = e.message || ''
+        if (raw === 'rate_limited' || raw.includes('quota')) break
+        if (!raw.includes('abort') && !raw.includes('500') && !raw.includes('503') && raw !== 'Failed to fetch') break
+      }
+    }
+    const raw = lastErr?.message || ''
+    setError(raw === 'rate_limited' ? 'Too many requests — please wait a moment.' : raw.includes('quota') ? 'AI quota exceeded. Please try again later.' : 'Server is temporarily unavailable. Please try again in a moment.')
+    setLoading(false)
   }
 
   const handlePrint = () => {
@@ -1098,25 +1116,44 @@ function FraudVulnerabilityTab({ formData }) {
 
   const handleAnalyze = async () => {
     setLoading(true); setErr(''); setData(null)
-    try {
-      const totalIncome = Object.values(formData?.income || {}).reduce((a, b) => a + (Number(b) || 0), 0)
-      const totalDebts  = Object.values(formData?.debts  || {}).reduce((a, b) => a + (Number(b) || 0), 0)
-      const body = {
-        totalMonthlyIncome: totalIncome,
-        totalMonthlyDebts:  totalDebts,
-        expenses:           formData?.expenses || {},
-        currentSavings:     formData?.currentSavings || 0,
-        age:                formData?.age || 25,
-        lifeStage:          formData?.lifeStage || 'young_adult',
-        riskAppetite:       formData?.riskAppetite || 'moderate',
+    const totalIncome = Object.values(formData?.income || {}).reduce((a, b) => a + (Number(b) || 0), 0)
+    const totalDebts  = Object.values(formData?.debts  || {}).reduce((a, b) => a + (Number(b) || 0), 0)
+    const body = {
+      totalMonthlyIncome: totalIncome,
+      totalMonthlyDebts:  totalDebts,
+      expenses:           formData?.expenses || {},
+      currentSavings:     formData?.currentSavings || 0,
+      age:                formData?.age || 25,
+      lifeStage:          formData?.lifeStage || 'young_adult',
+      riskAppetite:       formData?.riskAppetite || 'moderate',
+    }
+    let lastErr = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 3000))
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 90000)
+        const res = await fetch('/api/fraud-profile', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (res.status === 429) throw new Error('rate_limited')
+        if (!res.ok) throw new Error(`Server error ${res.status}`)
+        setData(await res.json())
+        setLoading(false)
+        return
+      } catch (e) {
+        lastErr = e
+        const raw = e.message || ''
+        if (raw === 'rate_limited' || raw.includes('quota')) break
+        if (!raw.includes('abort') && !raw.includes('500') && !raw.includes('503') && raw !== 'Failed to fetch') break
       }
-      const res = await fetch('/api/fraud-profile', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
-      setData(await res.json())
-    } catch (e) { setErr(e.message) } finally { setLoading(false) }
+    }
+    const raw = lastErr?.message || ''
+    setErr(raw === 'rate_limited' ? 'Too many requests — please wait a moment.' : raw.includes('quota') ? 'AI quota exceeded. Please try again later.' : 'Server is temporarily unavailable. Please try again in a moment.')
+    setLoading(false)
   }
 
   const score    = data?.vulnerability_score || 0
