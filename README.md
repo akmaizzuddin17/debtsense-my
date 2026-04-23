@@ -84,7 +84,9 @@ RM1,200 Google Cloud Credits (hackathon budget)
 
 ## AI Disclosure
 
-This project uses AI coding assistance (Claude Code by Anthropic) for frontend/backend development. All AI-generated code has been reviewed, tested, and understood by the developer. The core AI intelligence of the product itself uses **Gemini 2.5 Flash** exclusively, as required by the hackathon's Google AI Ecosystem mandate.
+**Development Process:** Gemini 2.5 Pro used for brainstorming, architecture planning, and development strategy. Claude Code used for implementation. All code reviewed, tested, and understood by the developer. 
+
+**Product AI:** The core AI intelligence uses **Gemini 2.5 Flash** exclusively (via Vertex AI), as required by the hackathon's Google AI Ecosystem mandate.
 
 ---
 
